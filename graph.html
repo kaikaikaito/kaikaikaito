@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>スコアグラフ</title>
+  <style>
+    body { font-family: sans-serif; padding: 2em; }
+    svg { border: 1px solid #ccc; display: block; margin-top: 1em; }
+    input { margin: 0.5em 0.25em; width: 500px; }
+    button { margin: 0.5em 0.25em; width: 200px; }
+    p { margin-block-end: 0; }
+    ul { margin-block-start: 0; }
+  </style>
+</head>
+<body>
+  <p id="info">
+    計算時刻（ページ表示時刻）: <span id="nowTime"></span><br>
+    スコアが1になる時刻: <ul id="score1List"></ul>
+  </p>
+  <input type="text" id="urlInput" placeholder="例: ?r=3&t=1653970294">
+  <button onclick="addGraphFromInput()">グラフを追加</button>
+  <svg width="800" height="400"></svg>
+
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script>
+    const HOUR_MAX = 72;
+    const HOUR_TICK = 4;
+
+    function formatDate(unixTime) {
+      const date = new Date(unixTime * 1000);
+      return `${(date.getMonth() + 1).toString().padStart(2, '0')}/` +
+             `${date.getDate().toString().padStart(2, '0')} ` +
+             `${date.getHours().toString().padStart(2, '0')}:` +
+             `${date.getMinutes().toString().padStart(2, '0')}:` +
+             `${date.getSeconds().toString().padStart(2, '0')}`;
+    }
+
+    const svg = d3.select("svg");
+    const width = +svg.attr("width") - 60;
+    const height = +svg.attr("height") - 40;
+    const g = svg.append("g").attr("transform", "translate(50,20)");
+
+    const x = d3.scaleLinear().domain([0, HOUR_MAX]).range([0, width]);
+    const y = d3.scaleLinear().domain([0, 11]).range([height, 0]);
+    const xTicks = d3.range(0, HOUR_MAX + 1, HOUR_TICK);  // x軸ラベルを4時間ごとに固定
+  
+    g.select("g:nth-child(2)").call(d3.axisLeft(y));
+    g.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x).tickValues(xTicks).tickFormat(d => `${d}h`));
+    g.append("g").call(d3.axisLeft(y));
+    // スコアが整数となるラインを引く（1〜最大スコアまで）
+    const maxY = y.domain()[1];
+    for (let i = 1; i <= Math.floor(maxY); i++) {
+      g.append("line")
+        .attr("x1", 0)
+        .attr("x2", width)
+        .attr("y1", y(i))
+        .attr("y2", y(i))
+        .attr("stroke", "#ccc")
+        .attr("stroke-dasharray", "3 3");
+    }
+    // 縦線を引く
+    for (let h = 0; h <= HOUR_MAX; h += HOUR_TICK) {
+      g.append("line")
+        .attr("x1", x(h))
+        .attr("x2", x(h))
+        .attr("y1", 0)
+        .attr("y2", height)
+        .attr("stroke", "#eee")
+        .attr("stroke-dasharray", "2 2");
+    }
+
+    let graphCount = 0;
+    const fixedNow = Math.floor(Date.now() / 1000);
+
+    document.getElementById("nowTime").textContent = formatDate(fixedNow);
+
+    function score(t, postTime, r) {
+      const dt = t - postTime;
+      if (dt < 0) return 0;
+      const h = dt / 3600;
+      if (h <= 24) {
+        return r * (1.1 - 0.1 * (h / 24));
+      } else {
+        return r / Math.sqrt(h - 24 + 1);
+      }
+    }
+
+    function parseQuery(str) {
+      let p;
+      try {
+        p = (new URL(str)).searchParams;
+      } catch {
+        p = new URLSearchParams(str);
+      }
+      return {
+        react: parseInt(p.get('r') || '0'),
+        postTime: parseInt(p.get('t'))
+      };
+    }
+
+    function hsvToHex(h) {
+      const f = (n, k = (n + h / 60) % 6) => Math.round(255 * (1 - Math.max(Math.min(k,4-k,1),0)));
+      return `#${[f(5), f(3), f(1)].map(x => x.toString(16).padStart(2, '0')).join('')}`;
+    }
+
+    function scoreEqualsOneTime(postTime, r) {
+      if (r < 1) return 0;
+      const h = 24 + ((r * r) - 1);
+      const seconds = Math.floor(h * 3600);
+      const timestamp = postTime + seconds;
+      return timestamp;
+    }
+
+    function addGraph(queryStr, color) {
+      const { react, postTime } = parseQuery(queryStr);
+      if(!(react && postTime)) {
+        alert("フォーマット不正");
+        return;
+      }
+      if(fixedNow < postTime) {
+        alert("投稿時刻が基準時刻より後です");
+        return;
+      }
+      console.log(react, postTime)
+
+      // スコアが1になる時刻
+      const score1_timestamp = scoreEqualsOneTime(postTime, react);
+      if(score1_timestamp < fixedNow) {
+        alert("既にスコアが1未満です");
+        return;
+      }
+      const li = document.createElement("li");
+      li.textContent = formatDate(score1_timestamp);
+      li.style.color = color;
+      document.getElementById("score1List").appendChild(li);
+
+
+      const points = [];
+      points.push({ x: 0, y: score(fixedNow, postTime, react)}); // 時刻0
+      for (let i = postTime%300; i <= HOUR_MAX * 3600; i += 300) {
+        // 投稿時刻から5分単位
+        const t = fixedNow + i;
+        const s = score(t, postTime, react);
+        if(s<1){
+          points.push({ x: (score1_timestamp - fixedNow) / 3600, y: 1}); // スコア1
+          break;
+        }
+        points.push({ x: i / 3600, y: s });
+      }
+
+      const line = d3.line()
+        .x(d => x(d.x))
+        .y(d => y(d.y))
+        .curve(d3.curveLinear);
+
+      g.append("path")
+        .datum(points)
+        .attr("fill", "none")
+        .attr("stroke", color)
+        .attr("stroke-width", 2)
+        .attr("d", line);
+    }
+
+    function addGraphFromInput() {
+      const input = document.getElementById("urlInput").value.trim();
+      if (!input) return;
+      graphCount++;
+      const hue = (graphCount * 137) % 360;
+      const color = hsvToHex(hue);
+      addGraph(input, color);
+    }
+
+    const defaultQuery = location.href;
+    if (defaultQuery) {
+      addGraph(defaultQuery, hsvToHex(0));
+      graphCount = 1;
+    }
+  </script>
+</body>
+</html>
