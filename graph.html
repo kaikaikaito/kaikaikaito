@@ -93,7 +93,7 @@
         p = new URLSearchParams(str);
       }
       return {
-        react: parseInt(p.get('r') || '0'),
+        react: parseFloat(p.get('r') || '0'),
         postTime: parseInt(p.get('t'))
       };
     }
@@ -171,7 +171,7 @@
 
         const points = [];
         points.push({ x: 0, y: now_score}); // 時刻0
-        for (let i = postTime%300; i <= HOUR_MAX * 3600; i += 300) {
+        for (let i = 300-postTime%300; i <= HOUR_MAX * 3600; i += 300) {
           // 投稿時刻から5分単位
           const t = fixedNow + i;
           const s = score(t, postTime, react);
